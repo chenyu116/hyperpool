@@ -1,21 +1,20 @@
 package hyperpool
 
 import (
-	"runtime"
 	"testing"
 )
 
-func BenchmarkLoopsParallel(b *testing.B) {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	pl := NewPool(1, 120)
-	pl.New = func() interface{} {
+func BenchmarkPool(b *testing.B) {
+	h := NewPool(120)
+	h.New = func() interface{} {
 		return 1
 	}
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			e := pl.Get().(int)
+			e := h.Get()
 			_ = e
-			pl.Put(e)
+			h.Put(e)
 		}
 	})
 }
