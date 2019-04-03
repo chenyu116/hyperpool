@@ -19,8 +19,10 @@ type Pool struct {
 }
 
 func (h *Pool) Get() (x interface{}) {
-	if h.free > 0 && atomic.LoadInt32(&h.cleaning) == 1 && h.New != nil {
-		x = h.New()
+	if atomic.LoadInt32(&h.cleaning) == 1 {
+		if h.New != nil {
+			x = h.New()
+		}
 		return
 	}
 	h.Lock()
@@ -38,9 +40,10 @@ func (h *Pool) Put(x interface{}) {
 	if x == nil {
 		return
 	}
-	if h.free > 0 && atomic.LoadInt32(&h.cleaning) == 1 && h.Close != nil {
-		h.Close(x)
-		x = nil
+	if atomic.LoadInt32(&h.cleaning) == 1 {
+		if h.Close != nil {
+			h.Close(x)
+		}
 		return
 	}
 
