@@ -10,6 +10,8 @@ func BenchmarkPool(b *testing.B) {
 		return 1
 	}
 
+	b.SetParallelism(50)
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			e := h.Get()
