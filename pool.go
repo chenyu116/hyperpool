@@ -71,6 +71,7 @@ func (h *Pool) clean() {
 				}
 				h.pools[i] = nil
 			}
+			h.pools = []interface{}{}
 			h.Unlock()
 			atomic.StoreUint32(&h.lastPut, 0)
 			atomic.StoreInt32(&h.cleaning, 0)
