@@ -81,10 +81,12 @@ func (h *Pool) clean() {
 }
 
 func NewPool(free uint32) *Pool {
+	h := new(Pool)
+
 	if free == 0 {
 		free = 60
 	}
-	h := &Pool{free: free}
+	h.free = free
 	go h.clean()
 
 	return h
