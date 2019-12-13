@@ -12,7 +12,7 @@ type Pool struct {
 	lastPut  uint32
 	cleaning int32
 
-	sync.Mutex
+	mu sync.Mutex
 
 	New   func() interface{}
 	Close func(x interface{})
@@ -25,13 +25,13 @@ func (h *Pool) Get() (x interface{}) {
 		}
 		return
 	}
-	h.Lock()
+	h.mu.Lock()
 	last := len(h.pools) - 1
 	if last >= 0 {
 		x = h.pools[last]
 		h.pools = h.pools[:last]
 	}
-	h.Unlock()
+	h.mu.Unlock()
 	if x == nil && h.New != nil {
 		x = h.New()
 	}
@@ -51,20 +51,20 @@ func (h *Pool) Put(x interface{}) {
 
 	atomic.StoreUint32(&h.lastPut, 0)
 
-	h.Lock()
+	h.mu.Lock()
 	h.pools = append(h.pools, x)
-	h.Unlock()
+	h.mu.Unlock()
 }
 
 func (h *Pool) clean() {
 	ticker := time.NewTicker(time.Second * 10)
 	for range ticker.C {
-		if h.free < atomic.LoadUint32(&h.lastPut) {
-			if atomic.LoadInt32(&h.cleaning) == 1 {
-				continue
-			}
-			h.Lock()
-			atomic.StoreInt32(&h.cleaning, 1)
+		if atomic.LoadInt32(&h.cleaning) == 1 {
+			continue
+		}
+		atomic.StoreInt32(&h.cleaning, 1)
+		if h.free < h.lastPut {
+			h.mu.Lock()
 			for i := 0; i < len(h.pools); i++ {
 				if h.pools[i] != nil && h.Close != nil {
 					h.Close(h.pools[i])
@@ -72,12 +72,12 @@ func (h *Pool) clean() {
 				h.pools[i] = nil
 			}
 			h.pools = []interface{}{}
-			h.Unlock()
-			atomic.StoreUint32(&h.lastPut, 0)
-			atomic.StoreInt32(&h.cleaning, 0)
-			continue
+			h.mu.Unlock()
+			h.lastPut = 0
+		} else {
+			h.lastPut += 10
 		}
-		atomic.AddUint32(&h.lastPut, 10)
+		atomic.StoreInt32(&h.cleaning, 0)
 	}
 }
 
@@ -85,7 +85,7 @@ func NewPool(free uint32) *Pool {
 	h := new(Pool)
 
 	if free == 0 {
-		free = 60
+		free = 120
 	}
 	h.free = free
 	go h.clean()

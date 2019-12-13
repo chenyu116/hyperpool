@@ -5,7 +5,7 @@ import (
 )
 
 func BenchmarkPool(b *testing.B) {
-	h := NewPool(120)
+	h := NewPool(0)
 	h.New = func() interface{} {
 		return 1
 	}
