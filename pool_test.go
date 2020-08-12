@@ -5,12 +5,11 @@ import (
 )
 
 func BenchmarkPool(b *testing.B) {
-	h := NewPool(0)
+	h := NewPool(1024, 0)
 	h.New = func() interface{} {
 		return 1
 	}
-
-	b.SetParallelism(50)
+	//b.SetParallelism(50)
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -18,5 +17,6 @@ func BenchmarkPool(b *testing.B) {
 			_ = e
 			h.Put(e)
 		}
+		//b.Log("hLen", h.Len(), h.FreeLen())
 	})
 }
