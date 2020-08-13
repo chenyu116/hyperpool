@@ -2,21 +2,19 @@ package hyperpool
 
 import (
 	"testing"
+	"time"
 )
 
-func BenchmarkPool(b *testing.B) {
-	h := NewPool(1024, 0)
-	h.New = func() interface{} {
-		return 1
-	}
-	//b.SetParallelism(50)
+var h = NewPool(2, time.Second*3, func() interface{} {
+	return 1
+})
 
+func BenchmarkPool(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			e := h.Get()
 			_ = e
 			h.Put(e)
 		}
-		//b.Log("hLen", h.Len(), h.FreeLen())
 	})
 }
