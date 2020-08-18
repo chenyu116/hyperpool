@@ -1,28 +1,24 @@
 package hyperpool
 
 import (
+	"sync/atomic"
 	"time"
 )
 
+// every queue has 8 cache slots
+var cacheQueueSize uint32
+
 type Pool struct {
-	New   func() interface{}
-	poolCache  []interface{}
+	New        func() interface{}
+	Close      func(i interface{})
 	resetAfter time.Duration
-	cacheSize  int
-	bits       uint64
+	lastPut    uint32
+	free       int64
+	shared     poolChain
 }
 
 func (p *Pool) Get() (x interface{}) {
-	pid := p.pin()
-	if pid != p.cacheSize {
-		x = p.poolCache[pid]
-		if x != nil {
-			p.poolCache[pid] = nil
-		}
-	}
-	if x == nil && p.New != nil {
-		x = p.New()
-	}
+	x, _ = p.shared.popHead()
 	return
 }
 
@@ -30,66 +26,63 @@ func (p *Pool) Put(x interface{}) {
 	if x == nil {
 		return
 	}
-	pid := p.unpin()
-	if pid == p.cacheSize {
-		return
-	}
-	p.poolCache[pid] = x
-	p.bits |= 1 << pid
+	p.shared.pushHead(x)
+	// check if still using the pool
+	atomic.StoreUint32(&p.lastPut, 1)
 }
 
+func (p *Pool) Len() int64 {
+	return p.free
+}
 func (p *Pool) reset() {
 	resetTicker := time.NewTicker(p.resetAfter)
-	var lastBits uint64 = 0
 	checkTimes := 0
 	checkLimit := 3
+	resetting := false
 	for range resetTicker.C {
-		if lastBits == 0 || lastBits != p.bits {
-			lastBits = p.bits
+		if p.lastPut == 1 {
+			atomic.StoreUint32(&p.lastPut, 0)
 			continue
 		}
-		if lastBits == p.bits {
+		if resetting {
+			continue
+		}
+		if p.lastPut == 0 {
 			if checkTimes < checkLimit {
 				checkTimes++
 				continue
 			}
+			resetting = true
+			for {
+				x := p.Get()
+				if x != nil && p.Close != nil {
+					p.Close(x)
+					continue
+				}
+				if x == nil {
+					break
+				}
+			}
+			for i := 0; i < int(cacheQueueSize*initSize); i++ {
+				p.Put(p.New())
+			}
 			checkTimes = 0
-			p.bits = 0
-			p.poolCache = make([]interface{}, p.cacheSize)
+			resetting = false
 		}
 	}
-}
-func (p *Pool) unpin() (pid int) {
-	for i := 0; i < p.cacheSize; i++ {
-		if 1<<i&p.bits == 0 {
-			return i
-		}
-	}
-	return p.cacheSize
-}
-func (p *Pool) pin() (pid int) {
-	for i := 0; i < p.cacheSize; i++ {
-		if 1<<i&p.bits != 0 {
-			p.bits &^= 1 << i
-			return i
-		}
-	}
-	return p.cacheSize
 }
 
-func NewPool(cacheSize int, resetAfter time.Duration, n func() interface{}) *Pool {
+func NewPool(queueSize uint32, resetAfter time.Duration, n func() interface{}) *Pool {
 	p := new(Pool)
 	p.resetAfter = resetAfter
 	if p.resetAfter == 0 {
 		p.resetAfter = time.Second * 120
 	}
+	cacheQueueSize = queueSize
 
-	p.cacheSize = cacheSize
-	if p.cacheSize >= 64 {
-		p.cacheSize = 64
+	for i := 0; i < int(cacheQueueSize*8); i++ {
+		p.Put(n())
 	}
-	p.poolCache = make([]interface{}, p.cacheSize)
-	p.bits = 0
 	p.New = n
 	go p.reset()
 
