@@ -120,6 +120,7 @@ func (p *Pool) release() {
 				}
 				atomic.AddInt32(&p.gets, -int32(p.Config.MaxKeepConn))
 			}
+			releaseTimer.Reset(p.Config.ReleaseAfter)
 			p.isReleasing = false
 		case <-p.releaseUpdate:
 			releaseTimer.Reset(p.Config.ReleaseAfter)
