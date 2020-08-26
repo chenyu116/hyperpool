@@ -8,10 +8,9 @@ import (
 type PoolConfig struct {
 	// max connections limit
 	MaxConn uint32
-	// max keep connections after release
+	// max reCreate connections after release
 	MaxKeepConn int
-	// release connections after
-	// if after the time has no client to put connection, will release the connections
+	// after this time if there was no client to put connection, Pool will release the connections
 	ReleaseAfter time.Duration
 }
 
@@ -40,7 +39,7 @@ type Pool struct {
 	Close         func(x interface{})
 	gets          int32
 	pools         chan interface{}
-	poolsIsClosed bool
+	isReleasing bool
 	releaseUpdate chan bool
 }
 
@@ -72,7 +71,7 @@ func (p *Pool) Put(x interface{}) {
 		return
 	}
 
-	if p.poolsIsClosed {
+	if p.isReleasing {
 		if p.Close != nil {
 			p.Close(x)
 		}
@@ -86,7 +85,7 @@ func (p *Pool) Put(x interface{}) {
 		if p.New != nil && p.gets > 0 {
 			atomic.AddInt32(&p.gets, -1)
 		}
-		if !p.poolsIsClosed {
+		if !p.isReleasing {
 			p.releaseUpdate <- true
 		}
 	default:
@@ -99,19 +98,21 @@ func (p *Pool) Put(x interface{}) {
 func (p *Pool) release() {
 	releaseTimer := time.NewTimer(p.Config.ReleaseAfter)
 	defer releaseTimer.Stop()
+	var x interface{}
 	for {
 		select {
 		case <-releaseTimer.C:
-			p.poolsIsClosed = true
+			p.isReleasing = true
 			for {
-				x := <-p.pools
+				if len(p.pools) == 0 {
+					x = nil
+					break
+				}
+				x = <-p.pools
 				if p.Close != nil {
 					p.Close(x)
 				}
 				atomic.AddInt32(&p.gets, 1)
-				if len(p.pools) == 0 {
-					break
-				}
 			}
 			if p.New != nil {
 				for i := 0; i < p.Config.MaxKeepConn; i++ {
@@ -119,7 +120,7 @@ func (p *Pool) release() {
 				}
 				atomic.AddInt32(&p.gets, -int32(p.Config.MaxKeepConn))
 			}
-			p.poolsIsClosed = false
+			p.isReleasing = false
 		case <-p.releaseUpdate:
 			releaseTimer.Reset(p.Config.ReleaseAfter)
 		}

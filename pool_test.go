@@ -17,8 +17,7 @@ func BenchmarkPool(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			e := p.Get(time.Millisecond * 300)
-			_ = e
+			e := p.Get()
 			p.Put(e)
 		}
 	})
