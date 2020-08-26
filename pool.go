@@ -31,7 +31,7 @@ func NewPool(new func() interface{}, cfg ...PoolConfig) *Pool {
 		releaseUpdate: make(chan bool, (config.MaxConn+config.MaxConn%2)/2),
 		new:           new,
 	}
-	if config.PreCreate {
+	if new != nil {
 		for i := 0; i < config.MaxKeepConn; i++ {
 			p.pools <- p.new()
 		}
