@@ -12,8 +12,6 @@ type PoolConfig struct {
 	MaxKeepConn int
 	// after this time if there was no client to put connection, Pool will release the connections
 	ReleaseAfter time.Duration
-	// create connections when init pool
-	PreCreate bool
 }
 
 func NewPool(new func() interface{}, cfg ...PoolConfig) *Pool {
