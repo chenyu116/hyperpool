@@ -6,14 +6,13 @@ import (
 )
 
 func BenchmarkPool(b *testing.B) {
-	p := NewPool(PoolConfig{
+	p := NewPool(func() interface{} {
+		return 1
+	}, PoolConfig{
 		MaxConn:      1000,
 		MaxKeepConn:  2,
 		ReleaseAfter: time.Second * 10,
 	})
-	p.New = func() interface{} {
-		return 1
-	}
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
