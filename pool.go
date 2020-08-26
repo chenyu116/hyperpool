@@ -92,6 +92,10 @@ func (p *Pool) Put(x interface{}) {
 	}
 }
 
+func (p *Pool) GetCreateConn() int32 {
+	return p.createdConn
+}
+
 func (p *Pool) release() {
 	releaseTimer := time.NewTimer(p.Config.ReleaseAfter)
 	defer releaseTimer.Stop()

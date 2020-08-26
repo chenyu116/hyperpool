@@ -10,14 +10,16 @@ func BenchmarkPool(b *testing.B) {
 		return 1
 	}, PoolConfig{
 		MaxConn:      1000,
-		MaxKeepConn:  2,
+		MaxKeepConn:  20,
 		ReleaseAfter: time.Second * 10,
 	})
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			e := p.Get()
+			_ = e
 			p.Put(e)
 		}
 	})
+	b.Log(p.GetCreateConn())
 }
