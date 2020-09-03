@@ -23,6 +23,12 @@ func NewPool(new func() interface{}, cfg ...PoolConfig) *Pool {
 	if len(cfg) > 0 {
 		config = cfg[0]
 	}
+	if config.MaxKeepConn <= 0 {
+		config.MaxKeepConn = 1
+	}
+	if config.MaxConn < uint32(config.MaxKeepConn) {
+		config.MaxConn = uint32(config.MaxKeepConn)
+	}
 	p := &Pool{
 		Config:        config,
 		pools:         make(chan interface{}, config.MaxConn),
@@ -45,7 +51,7 @@ type Pool struct {
 	Close         func(x interface{})
 	createdConn   int32
 	pools         chan interface{}
-	isReleasing   bool
+	isReleasing   int32
 	releaseUpdate chan bool
 }
 
@@ -74,21 +80,24 @@ func (p *Pool) Put(x interface{}) {
 		return
 	}
 
-	if p.isReleasing {
-		if p.Close != nil {
-			p.Close(x)
-		}
+	if p.releasing() {
+		p.revoke(x)
 		return
 	}
 	select {
 	case p.pools <- x:
-		if !p.isReleasing {
+		if !p.releasing() {
 			p.releaseUpdate <- true
 		}
 	default:
-		if p.Close != nil {
-			p.Close(x)
-		}
+		p.revoke(x)
+	}
+}
+
+func (p *Pool) revoke(x interface{}) {
+	if p.Close != nil {
+		p.Close(x)
+		atomic.AddInt32(&p.createdConn, -1)
 	}
 }
 
@@ -96,6 +105,15 @@ func (p *Pool) GetCreateConn() int32 {
 	return p.createdConn
 }
 
+func (p *Pool) releasing() bool {
+	return atomic.LoadInt32(&p.isReleasing) == 1
+}
+func (p *Pool) startRelease() {
+	atomic.StoreInt32(&p.isReleasing, 1)
+}
+func (p *Pool) revokeRelease() {
+	atomic.StoreInt32(&p.isReleasing, 0)
+}
 func (p *Pool) release() {
 	releaseTimer := time.NewTimer(p.Config.ReleaseAfter)
 	defer releaseTimer.Stop()
@@ -103,26 +121,25 @@ func (p *Pool) release() {
 	for {
 		select {
 		case <-releaseTimer.C:
-			p.isReleasing = true
-			for {
-				if len(p.pools) == 0 {
-					x = nil
-					break
+			if !p.releasing() {
+				p.startRelease()
+				for {
+					if len(p.pools) == 0 {
+						x = nil
+						break
+					}
+					x = <-p.pools
+					p.revoke(x)
 				}
-				x = <-p.pools
-				if p.Close != nil {
-					p.Close(x)
+				if p.new != nil {
+					for i := 0; i < p.Config.MaxKeepConn; i++ {
+						p.pools <- p.new()
+					}
+					atomic.AddInt32(&p.createdConn, int32(p.Config.MaxKeepConn))
 				}
-				atomic.AddInt32(&p.createdConn, -1)
+				releaseTimer.Reset(p.Config.ReleaseAfter)
+				p.revokeRelease()
 			}
-			if p.new != nil {
-				for i := 0; i < p.Config.MaxKeepConn; i++ {
-					p.pools <- p.new()
-				}
-				atomic.AddInt32(&p.createdConn, int32(p.Config.MaxKeepConn))
-			}
-			releaseTimer.Reset(p.Config.ReleaseAfter)
-			p.isReleasing = false
 		case <-p.releaseUpdate:
 			releaseTimer.Reset(p.Config.ReleaseAfter)
 		}
