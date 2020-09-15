@@ -69,7 +69,9 @@ func (p *Pool) Get(wait ...time.Duration) (x interface{}) {
 	if x == nil && p.new != nil {
 		if p.createdConn < int32(p.Config.MaxConn) {
 			x = p.new()
-			atomic.AddInt32(&p.createdConn, 1)
+			if x != nil {
+				atomic.AddInt32(&p.createdConn, 1)
+			}
 		}
 	}
 	return
@@ -81,7 +83,7 @@ func (p *Pool) Put(x interface{}) {
 	}
 
 	if p.releasing() {
-		p.revoke(x)
+		p.Revoke(x)
 		return
 	}
 	select {
@@ -90,11 +92,11 @@ func (p *Pool) Put(x interface{}) {
 			p.releaseUpdate <- true
 		}
 	default:
-		p.revoke(x)
+		p.Revoke(x)
 	}
 }
 
-func (p *Pool) revoke(x interface{}) {
+func (p *Pool) Revoke(x interface{}) {
 	if p.Close != nil {
 		p.Close(x)
 		atomic.AddInt32(&p.createdConn, -1)
@@ -111,7 +113,7 @@ func (p *Pool) releasing() bool {
 func (p *Pool) startRelease() {
 	atomic.StoreInt32(&p.isReleasing, 1)
 }
-func (p *Pool) revokeRelease() {
+func (p *Pool) stopRelease() {
 	atomic.StoreInt32(&p.isReleasing, 0)
 }
 func (p *Pool) release() {
@@ -123,22 +125,22 @@ func (p *Pool) release() {
 		case <-releaseTimer.C:
 			if !p.releasing() {
 				p.startRelease()
-				for {
-					if len(p.pools) == 0 {
-						x = nil
-						break
-					}
+				for len(p.pools) > 0 {
 					x = <-p.pools
-					p.revoke(x)
+					p.Revoke(x)
 				}
 				if p.new != nil {
 					for i := 0; i < p.Config.MaxKeepConn; i++ {
-						p.pools <- p.new()
+						x = p.new()
+						if x != nil {
+							p.pools <- x
+							atomic.AddInt32(&p.createdConn, 1)
+						}
 					}
-					atomic.AddInt32(&p.createdConn, int32(p.Config.MaxKeepConn))
 				}
+				x = nil
 				releaseTimer.Reset(p.Config.ReleaseAfter)
-				p.revokeRelease()
+				p.stopRelease()
 			}
 		case <-p.releaseUpdate:
 			releaseTimer.Reset(p.Config.ReleaseAfter)
