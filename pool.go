@@ -24,7 +24,7 @@ func NewPool(new func() interface{}, cfg ...PoolConfig) *Pool {
 		config = cfg[0]
 	}
 	if config.MaxKeepConn <= 0 {
-		config.MaxKeepConn = 1
+		config.MaxKeepConn = 0
 	}
 	if config.MaxConn < uint32(config.MaxKeepConn) {
 		config.MaxConn = uint32(config.MaxKeepConn)
@@ -35,11 +35,13 @@ func NewPool(new func() interface{}, cfg ...PoolConfig) *Pool {
 		releaseUpdate: make(chan bool, (config.MaxConn+config.MaxConn%2)/2),
 		new:           new,
 	}
-	if new != nil {
-		for i := 0; i < config.MaxKeepConn; i++ {
-			p.pools <- p.new()
-		}
-		p.createdConn = int32(config.MaxKeepConn)
+	if new != nil && config.MaxKeepConn > 0 {
+		go func() {
+			for i := 0; i < config.MaxKeepConn; i++ {
+				p.pools <- p.new()
+			}
+			atomic.AddInt32(&p.createdConn, int32(config.MaxKeepConn))
+		}()
 	}
 	go p.release()
 	return p
@@ -99,8 +101,8 @@ func (p *Pool) Put(x interface{}) {
 func (p *Pool) Revoke(x interface{}) {
 	if p.Close != nil {
 		p.Close(x)
-		atomic.AddInt32(&p.createdConn, -1)
 	}
+	atomic.AddInt32(&p.createdConn, -1)
 }
 
 func (p *Pool) GetCreateConn() int32 {
